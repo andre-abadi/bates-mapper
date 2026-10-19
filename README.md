@@ -37,7 +37,7 @@ Each Bates number found is printed with its result:
 | --- | --- |
 | Green | Mapped to a new number |
 | Dark gray | Mapped, number unchanged |
-| Cyan | Fuzzy match, marked `(fuzzy)` |
+| Cyan | Fuzzy match, noted `fuzzy` |
 | Yellow | No mapping, skipped |
 
 A summary of totals follows.

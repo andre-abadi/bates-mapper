@@ -60,11 +60,11 @@ function Import-BatesMap([string]$Path) {
         [void][Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
     }
 
-    Write-Host "`nLoaded $($map.Count) mapping(s)."
-    if ($dupes -gt 0) { Write-Warning "$dupes duplicate source number(s) ignored (first occurrence kept)." }
+    Write-Host "`nLoaded $($map.Count) mapping(s)." -ForegroundColor Cyan
+    if ($dupes -gt 0) { Write-Host "  $dupes duplicate source number(s) ignored (first occurrence kept)." -ForegroundColor Yellow }
     if ($missing.Count -gt 0) {
-        Write-Warning "$($missing.Count) source number(s) have no matching second column (proceeding anyway):"
-        $missing | ForEach-Object { Write-Warning "  $_" }
+        Write-Host "  $($missing.Count) source number(s) have no new number (not mapped):" -ForegroundColor Yellow
+        $missing | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
     }
     return $map
 }
@@ -88,8 +88,8 @@ $map = Import-BatesMap $xlsx.FullName
 $docx = Select-FileByExtension -Extension 'docx' -Prompt 'Select the Word document:'
 if (-not $docx) { return }
 
-$fuzzy = (Read-Host "`nEnable fuzzy mode? Unmapped numbers fall back to the next-lowest mapped number in the same prefix (Y = yes, anything else = no)") -cmatch '^[Yy]$'
-Write-Host ("Fuzzy mode: " + $(if ($fuzzy) { 'ON' } else { 'OFF' }))
+Write-Host "`nFuzzy mode: unmapped numbers use the nearest lower mapped number in the same prefix."
+$fuzzy = (Read-Host "Enable fuzzy mode? (Y = yes, anything else = no)") -cmatch '^[Yy]$'
 
 # Sorted mapped page numbers per prefix (everything before the last 4 digits)
 $byPrefix = @{}
@@ -124,7 +124,8 @@ $word.Visible = $false
 $word.DisplayAlerts = 0
 $doc = $null
 try {
-    Write-Host "`nProcessing $($docx.Name)...`n"
+    Write-Host ("`nProcessing {0} (fuzzy mode {1})`n" -f $docx.Name, $(if ($fuzzy) { 'on' } else { 'off' }))
+    Write-Host ('  {0,-18}    {1,-18}  {2}' -f 'FOUND', 'REPLACED WITH', 'NOTE') -ForegroundColor DarkGray
     $doc = $word.Documents.Open($docx.FullName, $false, $false)
     foreach ($story in Get-DocxStoryRanges $doc) {
         $rng = $story.Duplicate
@@ -147,20 +148,20 @@ try {
             if ($fuzzyKey) {
                 $fuzzyCount++
                 $newValue = $map[$fuzzyKey]
-                Write-Host "$old  ->  $newValue (fuzzy)" -ForegroundColor Cyan
+                Write-Host ('  {0,-18} -> {1,-18}  {2}' -f $old, $newValue, 'fuzzy') -ForegroundColor Cyan
             }
             elseif (-not $map.ContainsKey($old)) {
                 $noMap++; [void]$unmapped.Add($old)
-                Write-Host "$old  ->  (no mapping, skipped)" -ForegroundColor Yellow
+                Write-Host ('  {0,-18} -> {1,-18}  {2}' -f $old, '-', 'no mapping, skipped') -ForegroundColor Yellow
             }
             elseif ($map[$old] -eq $old) {
                 $unchanged++
-                Write-Host "$old  ->  $($map[$old]) (unchanged)" -ForegroundColor DarkGray
+                Write-Host ('  {0,-18} -> {1,-18}  {2}' -f $old, $map[$old], 'unchanged') -ForegroundColor DarkGray
             }
             else {
                 $changed++
                 $newValue = $map[$old]
-                Write-Host "$old  ->  $newValue" -ForegroundColor Green
+                Write-Host ('  {0,-18} -> {1,-18}' -f $old, $newValue) -ForegroundColor Green
             }
             if ($newValue -and $newValue -ne $old) {
                 $rng.Text = $newValue
@@ -183,10 +184,10 @@ finally {
     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($word)
 }
 
-Write-Host "`n===== Summary ====="
-Write-Host "Bates numbers found:        $total"
-Write-Host "Mapped (changed):           $changed"
-Write-Host "Mapped (unchanged):         $unchanged"
-if ($fuzzy) { Write-Host "Mapped (fuzzy):             $fuzzyCount" }
-Write-Host "Skipped (no mapping):       $noMap"
+Write-Host "`nSummary" -ForegroundColor Cyan
+Write-Host ('  {0,-22}{1,4}' -f 'Found', $total)
+Write-Host ('  {0,-22}{1,4}' -f 'Changed', $changed)
+if ($fuzzy) { Write-Host ('  {0,-22}{1,4}' -f 'Fuzzy matched', $fuzzyCount) }
+Write-Host ('  {0,-22}{1,4}' -f 'Unchanged', $unchanged)
+Write-Host ('  {0,-22}{1,4}' -f 'Skipped (no mapping)', $noMap)
 Write-Host ""
