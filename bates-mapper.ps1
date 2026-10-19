@@ -88,6 +88,31 @@ $map = Import-BatesMap $xlsx.FullName
 $docx = Select-FileByExtension -Extension 'docx' -Prompt 'Select the Word document:'
 if (-not $docx) { return }
 
+$fuzzy = (Read-Host "`nEnable fuzzy mode? Unmapped numbers fall back to the next-lowest mapped number in the same prefix (Y = yes, anything else = no)") -cmatch '^[Yy]$'
+Write-Host ("Fuzzy mode: " + $(if ($fuzzy) { 'ON' } else { 'OFF' }))
+
+# Sorted mapped page numbers per prefix (everything before the last 4 digits)
+$byPrefix = @{}
+if ($fuzzy) {
+    foreach ($k in $map.Keys) {
+        $p = $k.Substring(0, $k.Length - 4)
+        if (-not $byPrefix.ContainsKey($p)) { $byPrefix[$p] = [System.Collections.Generic.List[int]]::new() }
+        $byPrefix[$p].Add([int]$k.Substring($k.Length - 4))
+    }
+    foreach ($p in @($byPrefix.Keys)) { $byPrefix[$p].Sort() }
+}
+
+function Find-FuzzyKey([string]$Bates) {
+    $p = $Bates.Substring(0, $Bates.Length - 4)
+    $n = [int]$Bates.Substring($Bates.Length - 4)
+    if (-not $byPrefix.ContainsKey($p)) { return $null }
+    $best = $null
+    foreach ($v in $byPrefix[$p]) { if ($v -lt $n) { $best = $v } else { break } }
+    if ($null -eq $best) { return $null }
+    return $p + $best.ToString('0000')
+}
+
+$fuzzyCount = 0
 $regex = [regex]"(?<![A-Za-z0-9])$($Global:BatesPattern)(?![A-Za-z0-9])"
 $total = 0; $changed = 0; $unchanged = 0; $noMap = 0
 $unmapped = [System.Collections.Generic.HashSet[string]]::new()
@@ -103,7 +128,13 @@ try {
         foreach ($m in $regex.Matches($text)) {
             $total++
             $old = $m.Value
-            if (-not $map.ContainsKey($old)) {
+            $fuzzyKey = $null
+            if ($fuzzy -and -not $map.ContainsKey($old)) { $fuzzyKey = Find-FuzzyKey $old }
+            if ($fuzzyKey) {
+                $fuzzyCount++
+                Write-Host "$old  ->  $($map[$fuzzyKey]) (fuzzy)" -ForegroundColor Cyan
+            }
+            elseif (-not $map.ContainsKey($old)) {
                 $noMap++; [void]$unmapped.Add($old)
                 Write-Host "$old  ->  (no mapping, skipped)" -ForegroundColor Yellow
             }
@@ -128,5 +159,6 @@ Write-Host "`n===== Summary ====="
 Write-Host "Bates numbers found:        $total"
 Write-Host "Mapped (changed):           $changed"
 Write-Host "Mapped (unchanged):         $unchanged"
+if ($fuzzy) { Write-Host "Mapped (fuzzy):             $fuzzyCount" }
 Write-Host "Skipped (no mapping):       $noMap"
 Write-Host ""
