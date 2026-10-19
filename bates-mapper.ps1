@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-Maps Bates numbers found in a .docx to new Bates numbers defined in an .xlsx (col A = old, col B = new).
-Read-only: neither file is modified. Requires Excel and Word (COM).
+Replaces Bates numbers in a .docx with new Bates numbers defined in an .xlsx (col A = old, col B = new).
+The .docx is saved only if at least one replacement is made; the .xlsx is never modified. Requires Excel and Word (COM).
 #>
 
 # Global Bates format (regex). Default: ABC.001.001.0001
@@ -69,12 +69,12 @@ function Import-BatesMap([string]$Path) {
     return $map
 }
 
-# Emits the text of every story (body, footnotes, endnotes, headers, footers, text boxes...)
-function Get-DocxStoryTexts($Doc) {
+# Emits every story range (body, footnotes, endnotes, headers, footers, text boxes...)
+function Get-DocxStoryRanges($Doc) {
     foreach ($story in $Doc.StoryRanges) {
         $range = $story
         while ($range) {
-            $range.Text
+            $range
             $range = $range.NextStoryRange
         }
     }
@@ -113,7 +113,9 @@ function Find-FuzzyKey([string]$Bates) {
 }
 
 $fuzzyCount = 0
-$regex = [regex]"(?<![A-Za-z0-9])$($Global:BatesPattern)(?![A-Za-z0-9])"
+$exactRegex = [regex]"^$($Global:BatesPattern)$"
+$wildcard = $Global:BatesPattern.Replace('\d', '[0-9]').Replace('\.', '.')  # Word wildcard syntax
+$replaced = 0
 $total = 0; $changed = 0; $unchanged = 0; $noMap = 0
 $unmapped = [System.Collections.Generic.HashSet[string]]::new()
 
@@ -123,16 +125,29 @@ $word.DisplayAlerts = 0
 $doc = $null
 try {
     Write-Host "`nProcessing $($docx.Name)...`n"
-    $doc = $word.Documents.Open($docx.FullName, $false, $true)
-    foreach ($text in Get-DocxStoryTexts $doc) {
-        foreach ($m in $regex.Matches($text)) {
+    $doc = $word.Documents.Open($docx.FullName, $false, $false)
+    foreach ($story in Get-DocxStoryRanges $doc) {
+        $rng = $story.Duplicate
+        $find = $rng.Find
+        $find.ClearFormatting()
+        $find.Text = $wildcard
+        $find.MatchWildcards = $true
+        $find.Forward = $true
+        $find.Wrap = 0
+        while ($find.Execute()) {
+            $old = $rng.Text
+            $before = $rng.Duplicate; $before.Collapse(1); [void]$before.MoveStart(1, -1)
+            $after = $rng.Duplicate; $after.Collapse(0); [void]$after.MoveEnd(1, 1)
+            $isBates = $exactRegex.IsMatch($old) -and ($before.Text -notmatch '[A-Za-z0-9]$') -and ($after.Text -notmatch '^[A-Za-z0-9]')
+            if (-not $isBates) { $rng.Collapse(0); continue }
             $total++
-            $old = $m.Value
+            $newValue = $null
             $fuzzyKey = $null
             if ($fuzzy -and -not $map.ContainsKey($old)) { $fuzzyKey = Find-FuzzyKey $old }
             if ($fuzzyKey) {
                 $fuzzyCount++
-                Write-Host "$old  ->  $($map[$fuzzyKey]) (fuzzy)" -ForegroundColor Cyan
+                $newValue = $map[$fuzzyKey]
+                Write-Host "$old  ->  $newValue (fuzzy)" -ForegroundColor Cyan
             }
             elseif (-not $map.ContainsKey($old)) {
                 $noMap++; [void]$unmapped.Add($old)
@@ -144,9 +159,22 @@ try {
             }
             else {
                 $changed++
-                Write-Host "$old  ->  $($map[$old])" -ForegroundColor Green
+                $newValue = $map[$old]
+                Write-Host "$old  ->  $newValue" -ForegroundColor Green
             }
+            if ($newValue -and $newValue -ne $old) {
+                $rng.Text = $newValue
+                $replaced++
+            }
+            $rng.Collapse(0)
         }
+    }
+    if ($replaced -gt 0) {
+        $doc.Save()
+        Write-Host "`nSaved $($docx.Name) with $replaced replacement(s)." -ForegroundColor Green
+    }
+    else {
+        Write-Host "`nNo changes made; $($docx.Name) not saved."
     }
 }
 finally {
