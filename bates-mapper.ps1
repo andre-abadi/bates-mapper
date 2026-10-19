@@ -7,6 +7,10 @@ The .docx is saved only if at least one replacement is made; the .xlsx is never 
 # Global Bates format (regex). Default: ABC.001.001.0001
 $Global:BatesPattern = '[A-Z]{3}\.\d{3}\.\d{3}\.\d{4}'
 
+# How many columns (per row) and rows to scan to find the first Bates id in the spreadsheet
+$Global:traverse_columns = 5
+$Global:traverse_rows = 10
+
 function Select-FileByExtension {
     param([string]$Extension, [string]$Prompt)
     $files = @(Get-ChildItem -LiteralPath (Get-Location).Path -Filter "*.$Extension" -File |
@@ -41,11 +45,33 @@ function Import-BatesMap([string]$Path) {
         $ws = $wb.Worksheets.Item(1)
         $lastRow = $ws.UsedRange.Row + $ws.UsedRange.Rows.Count - 1
         if ($lastRow -ge 1) {
-            # One bulk read of columns A:B into a 2D array
-            $data = $ws.Range($ws.Cells.Item(1, 1), $ws.Cells.Item($lastRow, 2)).Value2
-            for ($r = 1; $r -le $lastRow; $r++) {
-                $a = "$($data[$r, 1])".Trim()
-                $b = "$($data[$r, 2])".Trim()
+            # One bulk read covering the scan area plus the column after it (the new number)
+            $data = $ws.Range($ws.Cells.Item(1, 1), $ws.Cells.Item($lastRow, $Global:traverse_columns + 1)).Value2
+
+            # Scan each row across columns 1..traverse_columns; the first hit sets the start row and old-number column
+            $startRow = 0; $oldCol = 0
+            $scanRows = [Math]::Min($Global:traverse_rows, $lastRow)
+            :scan for ($r = 1; $r -le $scanRows; $r++) {
+                for ($c = 1; $c -le $Global:traverse_columns; $c++) {
+                    if ("$($data[$r, $c])".Trim() -match $exact) { $startRow = $r; $oldCol = $c; break scan }
+                }
+            }
+            if ($startRow -eq 0) {
+                Write-Host "`nNo Bates number found in the first $scanRows row(s) x $($Global:traverse_columns) column(s) of the spreadsheet." -ForegroundColor Yellow
+            }
+            # No Bates numbers in the next column: it is only the authoritative list of correct numbers
+            $listOnly = $false
+            if ($startRow -gt 0) {
+                $listOnly = $true
+                for ($r = $startRow; $r -le $lastRow; $r++) {
+                    if ("$($data[$r, ($oldCol + 1)])".Trim() -match $exact) { $listOnly = $false; break }
+                }
+                if ($listOnly) { Write-Host "`nNo second column of Bates numbers found; treating column $oldCol as the list of correct numbers." -ForegroundColor Cyan }
+            }
+            for ($r = $startRow; $startRow -gt 0 -and $r -le $lastRow; $r++) {
+                $a = "$($data[$r, $oldCol])".Trim()
+                $b = "$($data[$r, ($oldCol + 1)])".Trim()
+                if ($listOnly) { $b = $a }
                 if ($a -eq '' -and $b -eq '') { continue }
                 if ($a -notmatch $exact) { continue }
                 if ($b -eq '') { $missing.Add("row ${r}: $a"); continue }

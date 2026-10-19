@@ -21,7 +21,7 @@ PowerShell tool that finds Bates numbers in a Word document and replaces each wi
 
 ## Mapping file
 
-The first worksheet is used. Column A holds the old Bates number and column B the new one; other columns are ignored. Rows whose column A does not match the Bates pattern (such as headers) are skipped. Duplicate old numbers keep the first occurrence, and rows with a blank column B are reported as warnings and not mapped. Any number in the document that already appears in column B is left untouched, so the tool is safe to run repeatedly (including in fuzzy mode).
+The first worksheet is used. The script scans each row (up to `$Global:traverse_rows`, default 10), across columns 1 to `$Global:traverse_columns` (default 5), for the first Bates number. That cell's row is where the data starts and its column holds the old number; the column immediately to its right holds the new number. Other columns are ignored. If the next column contains no Bates numbers, the found column is treated as a list of correct numbers only: numbers in the list are left alone, and with fuzzy mode on any other number falls back to the nearest lower number in the list (without fuzzy mode it is skipped). Rows whose old-number cell does not match the Bates pattern (such as headers) are skipped. Duplicate old numbers keep the first occurrence, and rows with a blank column B are reported as warnings and not mapped. Any number in the document that already appears in column B is left untouched, so the tool is safe to run repeatedly (including in fuzzy mode).
 
 ## Bates format
 
