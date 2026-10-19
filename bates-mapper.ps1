@@ -116,6 +116,8 @@ $fuzzyCount = 0
 $exactRegex = [regex]"^$($Global:BatesPattern)$"
 $wildcard = $Global:BatesPattern.Replace('\d', '[0-9]').Replace('\.', '.')  # Word wildcard syntax
 $replaced = 0
+# Numbers already in column B are final and must never be touched again
+$targets = [System.Collections.Generic.HashSet[string]]::new([string[]]@($map.Values))
 $total = 0; $changed = 0; $unchanged = 0; $noMap = 0
 $unmapped = [System.Collections.Generic.HashSet[string]]::new()
 
@@ -144,8 +146,12 @@ try {
             $total++
             $newValue = $null
             $fuzzyKey = $null
-            if ($fuzzy -and -not $map.ContainsKey($old)) { $fuzzyKey = Find-FuzzyKey $old }
-            if ($fuzzyKey) {
+            if ($fuzzy -and -not $map.ContainsKey($old) -and -not $targets.Contains($old)) { $fuzzyKey = Find-FuzzyKey $old }
+            if ($targets.Contains($old)) {
+                $unchanged++
+                Write-Host ('  {0,-18} -> {1,-18}  {2}' -f $old, $old, 'unchanged') -ForegroundColor DarkGray
+            }
+            elseif ($fuzzyKey) {
                 $fuzzyCount++
                 $newValue = $map[$fuzzyKey]
                 Write-Host ('  {0,-18} -> {1,-18}  {2}' -f $old, $newValue, 'fuzzy') -ForegroundColor Cyan
